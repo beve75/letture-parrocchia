@@ -145,7 +145,6 @@
 <script>
 const { createApp, ref, computed, onMounted } = Vue;
 
-// --- CONFIGURAZIONE URL GOOGLE APPS SCRIPT ---
 const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycby0_54wc3yudsfFUkZDtqgcOQrzlYJTHjQVsGeo7elw-op2c-Z_baUZPPXTqB_aD4D8/exec'; 
 
 createApp({
@@ -153,6 +152,7 @@ createApp({
         const currentUser = ref(localStorage.getItem('reader_name_v3') || null);
         const tempName = ref('');
         const loading = ref(false);
+        const isSaving = ref(false); // Stato per sospendere il refresh durante il salvataggio
         const db = ref(JSON.parse(localStorage.getItem('liturgia_cache_v3') || '[]'));
         const viewDate = ref(new Date(2026, 0, 1)); 
         const selectedDay = ref(null);
@@ -166,23 +166,21 @@ createApp({
                 const data = await res.json();
                 db.value = data;
                 localStorage.setItem('liturgia_cache_v3', JSON.stringify(data));
+                console.log("Dati aggiornati:", new Date().toLocaleTimeString());
             } catch (e) { console.error("Sync error"); }
             loading.value = false;
         };
 
         const saveSlot = async (slot, userName) => {
+            isSaving.value = true; // Blocca il polling automatico
             const oldUser = slot.utente;
-            slot.utente = userName; // UI reattiva: mostra subito il cambio
-        
-            console.log("Tentativo di salvataggio per:", { date: slot.data, time: slot.orario, type: slot.tipo });
+            slot.utente = userName; 
         
             try {
                 const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
                     mode: 'cors', 
-                    headers: {
-                        'Content-Type': 'text/plain'
-                    },
+                    headers: { 'Content-Type': 'text/plain' },
                     body: JSON.stringify({ 
                         date: slot.data, 
                         time: slot.orario,
@@ -192,20 +190,18 @@ createApp({
                 });
                 
                 const resultText = await response.text();
-                
-                // Log della risposta completa di Google Apps Script
-                console.log("RISPOSTA SERVER GOOGLE:", resultText);
+                console.log("RISPOSTA SERVER:", resultText);
         
                 if (resultText.includes("SUCCESS")) {
-                    console.log("✅ Foglio aggiornato correttamente.");
                     localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
                 } else {
-                    console.warn("⚠️ Match non riuscito. Controlla i log di debug sopra.");
+                    console.warn("⚠️ Match non riuscito.");
                 }
-        
             } catch (e) {
                 slot.utente = oldUser;
-                console.error("❌ Errore di connessione/CORS:", e);
+                console.error("❌ Errore di connessione:", e);
+            } finally {
+                isSaving.value = false; // Sblocca il polling automatico
             }
         };
 
@@ -245,7 +241,6 @@ createApp({
             });
         });
 
-        // Limiti basati sui dati presenti nel foglio
         const isAtMinLimit = computed(() => {
             if (!db.value.length) return true;
             const minDate = db.value.map(s => s.data).sort()[0];
@@ -280,10 +275,19 @@ createApp({
             return new Date(y, m-1, day).toLocaleDateString('it-IT', {weekday:'long', day:'numeric', month:'long'});
         };
 
-        onMounted(() => { if(currentUser.value) fetchData(); });
+        onMounted(() => { 
+            if(currentUser.value) fetchData(); 
+            
+            // Timer di aggiornamento ogni 30 secondi
+            setInterval(() => {
+                if (currentUser.value && !loading.value && !isSaving.value) {
+                    fetchData();
+                }
+            }, 30000);
+        });
 
         return { 
-            currentUser, tempName, loading, db, viewDate, selectedDay, isAdmin, 
+            currentUser, tempName, loading, isSaving, db, viewDate, selectedDay, isAdmin, 
             isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, 
             monthLabel: computed(() => viewDate.value.toLocaleString('it-IT', {month:'long', year:'numeric'})),
             login, logout, nextMonth, prevMonth, getSlots, selectDay, saveSlot, 
