@@ -21,6 +21,10 @@
 
 <div id="app" v-cloak class="min-h-screen flex flex-col">
     
+    <div v-if="isTestMode" class="bg-orange-500 text-white text-[10px] py-1.5 text-center font-bold uppercase tracking-widest sticky top-0 z-[60] shadow-md">
+        <i class="fas fa-flask mr-2"></i> Ambiente di Test - I dati non sono reali
+    </div>
+
     <div v-if="loading && db.length === 0" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center">
         <div class="animate-spin text-blue-600 text-5xl mb-4"><i class="fas fa-circle-notch"></i></div>
         <p class="text-slate-500 font-bold">Caricamento calendario...</p>
@@ -42,7 +46,7 @@
     </div>
 
     <template v-else>
-        <header class="bg-white border-b sticky top-0 z-30 shadow-sm px-4 py-3">
+        <header class="bg-white border-b sticky top-0 z-30 shadow-sm px-4 py-3" :style="isTestMode ? 'top: 28px' : 'top: 0'">
             <div class="max-w-4xl mx-auto flex justify-between items-center">
                 <div class="flex items-center gap-2">
                     <button @click="prevMonth" :disabled="isAtMinLimit" class="p-2 disabled:opacity-10"><i class="fas fa-chevron-left"></i></button>
@@ -145,14 +149,24 @@
 <script>
 const { createApp, ref, computed, onMounted } = Vue;
 
-const SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyxKNEptMVjPs0dbJp_HZjzdgQXeZiQSehATkHDGwDKq8ip_kqE3FOMO2_Ew-2Oc0mUBA/exec'; 
+// --- CONFIGURAZIONE AMBIENTE ---
+const CONFIG = {
+    prod: 'https://script.google.com/macros/s/AKfycbyxKNEptMVjPs0dbJp_HZjzdgQXeZiQSehATkHDGwDKq8ip_kqE3FOMO2_Ew-2Oc0mUBA/exec',
+    test: 'https://script.google.com/macros/s/AKfycbyDarwZOqpizS0CO5aEMU-Gur6oj3BnD2X8L713TOxG-a9z1C8m1UgEY4YPcnSoPrVjXA/exec',
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+const isTestMode = urlParams.get('mode') === 'test';
+const SCRIPT_URL = isTestMode ? CONFIG.test : CONFIG.prod;
+
+console.log("🚀 Ambiente attivo:", isTestMode ? "TEST" : "PRODUZIONE");
 
 createApp({
     setup() {
         const currentUser = ref(localStorage.getItem('reader_name_v3') || null);
         const tempName = ref('');
         const loading = ref(false);
-        const isSaving = ref(false); // Stato per sospendere il refresh durante il salvataggio
+        const isSaving = ref(false);
         const db = ref(JSON.parse(localStorage.getItem('liturgia_cache_v3') || '[]'));
         const viewDate = ref(new Date(2026, 0, 1)); 
         const selectedDay = ref(null);
@@ -172,7 +186,7 @@ createApp({
         };
 
         const saveSlot = async (slot, userName) => {
-            isSaving.value = true; // Blocca il polling automatico
+            isSaving.value = true;
             const oldUser = slot.utente;
             slot.utente = userName; 
         
@@ -190,18 +204,18 @@ createApp({
                 });
                 
                 const resultText = await response.text();
-                console.log("RISPOSTA SERVER:", resultText);
-        
+                
                 if (resultText.includes("SUCCESS")) {
                     localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
-                } else {
-                    console.warn("⚠️ Match non riuscito.");
+                } else if (resultText.includes("ERRORE")) {
+                    alert(resultText); // Avviso se il posto è già stato occupato
+                    fetchData();
                 }
             } catch (e) {
                 slot.utente = oldUser;
                 console.error("❌ Errore di connessione:", e);
             } finally {
-                isSaving.value = false; // Sblocca il polling automatico
+                isSaving.value = false;
             }
         };
 
@@ -278,7 +292,7 @@ createApp({
         onMounted(() => { 
             if(currentUser.value) fetchData(); 
             
-            // Timer di aggiornamento ogni 30 secondi
+            // Polling automatico ogni 30 secondi
             setInterval(() => {
                 if (currentUser.value && !loading.value && !isSaving.value) {
                     fetchData();
@@ -288,7 +302,7 @@ createApp({
 
         return { 
             currentUser, tempName, loading, isSaving, db, viewDate, selectedDay, isAdmin, 
-            isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, 
+            isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, isTestMode,
             monthLabel: computed(() => viewDate.value.toLocaleString('it-IT', {month:'long', year:'numeric'})),
             login, logout, nextMonth, prevMonth, getSlots, selectDay, saveSlot, 
             formatDateLong, getIcon, getDistinctTimes, getSlotsByTime 
