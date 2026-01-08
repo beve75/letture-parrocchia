@@ -169,14 +169,16 @@ createApp({
 
         const saveSlot = async (slot, userName) => {
             const oldUser = slot.utente;
-            slot.utente = userName; // UI istantanea
+            slot.utente = userName; // UI reattiva: mostra subito il cambio
+        
+            console.log("Tentativo di salvataggio per:", { date: slot.data, time: slot.orario, type: slot.tipo });
         
             try {
-                await fetch(SCRIPT_URL, {
+                const response = await fetch(SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors', // Necessario per bypassare CORS
+                    mode: 'cors', 
                     headers: {
-                        'Content-Type': 'text/plain' // Usiamo text/plain per evitare pre-flight
+                        'Content-Type': 'text/plain'
                     },
                     body: JSON.stringify({ 
                         date: slot.data, 
@@ -186,13 +188,21 @@ createApp({
                     })
                 });
                 
-                // Salviamo in cache locale
-                localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
-                console.log("Dati inviati al server.");
+                const resultText = await response.text();
+                
+                // Log della risposta completa di Google Apps Script
+                console.log("RISPOSTA SERVER GOOGLE:", resultText);
+        
+                if (resultText.includes("SUCCESS")) {
+                    console.log("✅ Foglio aggiornato correttamente.");
+                    localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
+                } else {
+                    console.warn("⚠️ Match non riuscito. Controlla i log di debug sopra.");
+                }
+        
             } catch (e) {
                 slot.utente = oldUser;
-                alert("Errore di sincronizzazione.");
-                console.error(e);
+                console.error("❌ Errore di connessione/CORS:", e);
             }
         };
 
