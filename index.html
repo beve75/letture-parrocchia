@@ -169,12 +169,15 @@ createApp({
 
         const saveSlot = async (slot, userName) => {
             const oldUser = slot.utente;
-            slot.utente = userName; // Aggiornamento Ottimista (UI istantanea)
-
+            slot.utente = userName; // UI istantanea
+        
             try {
                 await fetch(SCRIPT_URL, {
                     method: 'POST',
-                    mode: 'no-cors',
+                    mode: 'no-cors', // Necessario per bypassare CORS
+                    headers: {
+                        'Content-Type': 'text/plain' // Usiamo text/plain per evitare pre-flight
+                    },
                     body: JSON.stringify({ 
                         date: slot.data, 
                         time: slot.orario,
@@ -182,10 +185,14 @@ createApp({
                         user: userName 
                     })
                 });
+                
+                // Salviamo in cache locale
                 localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
+                console.log("Dati inviati al server.");
             } catch (e) {
-                slot.utente = oldUser; // Rollback in caso di errore
-                alert("Connessione fallita. Riprova.");
+                slot.utente = oldUser;
+                alert("Errore di sincronizzazione.");
+                console.error(e);
             }
         };
 
