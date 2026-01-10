@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Visualizzazione Lettori</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+</head>
+<body class="bg-slate-100 text-slate-900">
+
+<div id="app" v-cloak class="min-h-screen flex flex-col items-center p-4">
+    
+    <div v-if="loading" class="mt-20 flex flex-col items-center">
+        <div class="animate-spin text-blue-600 text-4xl mb-4"><i class="fas fa-circle-notch"></i></div>
+        <p class="text-slate-500 font-medium">Recupero lettori...</p>
+    </div>
+
+    <div v-else-if="currentMessa" class="w-full max-w-md">
+        
+        <div class="bg-white rounded-3xl shadow-xl p-6 mb-6 border border-blue-100 text-center">
+            <div class="flex justify-between items-center mb-4">
+                <button @click="prevMessa" :disabled="currentIndex <= 0" 
+                        class="w-12 h-12 flex items-center justify-center rounded-full bg-slate-50 text-blue-600 disabled:opacity-20 transition-all shadow-sm">
+                    <i class="fas fa-chevron-left"></i>
+                </button>
+                
+                <div class="flex-grow">
+                    <p class="text-blue-600 font-black uppercase text-[10px] tracking-widest mb-1">Messa del giorno</p>
+                    <h1 class="text-xl font-bold capitalize">{{ formatDate(currentMessa.date) }}</h1>
+                    <p class="text-2xl font-black text-slate-800">ore {{ currentMessa.time }}</p>
+                </div>
+
+                <button @click="nextMessa" :disabled="currentIndex >= messeRaggruppate.length - 1"
+                        class="w-12 h-12 flex items-center justify-center rounded-full bg-slate-50 text-blue-600 disabled:opacity-20 transition-all shadow-sm">
+                    <i class="fas fa-chevron-right"></i>
+                </button>
+            </div>
+        </div>
+
+        <div class="space-y-3">
+            <div v-for="slot in currentMessa.slots" :key="slot.tipo" 
+                 class="bg-white p-4 rounded-2xl shadow-md flex items-center gap-4 border-l-4"
+                 :class="slot.utente ? 'border-green-500' : 'border-amber-400'">
+                
+                <div class="w-10 h-10 rounded-full bg-slate-50 flex items-center justify-center text-slate-400">
+                    <i class="fas" :class="getIcon(slot.tipo)"></i>
+                </div>
+                
+                <div class="flex-grow">
+                    <p class="text-[10px] font-bold text-slate-400 uppercase leading-none mb-1">{{ slot.tipo }}</p>
+                    <p class="font-bold text-lg" :class="slot.utente ? 'text-slate-800' : 'text-amber-600 italic'">
+                        {{ slot.utente || 'Da assegnare' }}
+                    </p>
+                </div>
+
+                <div v-if="slot.utente">
+                    <i class="fas fa-check-circle text-green-500 text-xl"></i>
+                </div>
+            </div>
+        </div>
+
+        <p class="text-center text-slate-400 text-[10px] mt-10 uppercase tracking-widest">
+            Aggiornato al {{ lastUpdate }}
+        </p>
+    </div>
+
+    <div v-else class="mt-20 text-center p-8 bg-white rounded-3xl shadow">
+        <i class="fas fa-calendar-times text-slate-300 text-5xl mb-4"></i>
+        <p class="text-slate-500">Nessuna messa futura trovata nel sistema.</p>
+    </div>
+
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+const CONFIG = {
+    prod: 'https://script.google.com/macros/s/AKfycbyxKNEptMVjPs0dbJp_HZjzdgQXeZiQSehATkHDGwDKq8ip_kqE3FOMO2_Ew-2Oc0mUBA/exec',
+    test: 'https://script.google.com/macros/s/AKfycbyDarwZOqpizS0CO5aEMU-Gur6oj3BnD2X8L713TOxG-a9z1C8m1UgEY4YPcnSoPrVjXA/exec',
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+const isTestMode = urlParams.get('mode') === 'test';
+const SCRIPT_URL = isTestMode ? CONFIG.test : CONFIG.prod;
+
+createApp({
+    setup() {
+        const loading = ref(true);
+        const db = ref([]);
+        const currentIndex = ref(0);
+        const lastUpdate = ref('');
+
+        const fetchData = async () => {
+            try {
+                const res = await fetch(SCRIPT_URL);
+                db.value = await res.json();
+                lastUpdate.value = new Date().toLocaleTimeString('it-IT', {hour: '2-digit', minute:'2-digit'});
+                setInitialMessa();
+            } catch (e) { console.error("Errore caricamento"); }
+            loading.value = false;
+        };
+
+        // Raggruppa gli slot per data e ora
+        const messeRaggruppate = computed(() => {
+            const groups = {};
+            db.value.forEach(slot => {
+                const key = `${slot.data}_${slot.orario}`;
+                if (!groups[key]) {
+                    groups[key] = { date: slot.data, time: slot.orario, slots: [] };
+                }
+                groups[key].slots.push(slot);
+            });
+            // Ordina cronologicamente
+            return Object.values(groups).sort((a, b) => {
+                return a.date.localeCompare(b.date) || a.time.localeCompare(b.time);
+            });
+        });
+
+        const setInitialMessa = () => {
+            const oggi = new Date().toISOString().split('T')[0];
+            // Trova la prima messa che sia oggi o nel futuro
+            const index = messeRaggruppate.value.findIndex(m => m.date >= oggi);
+            currentIndex.value = index !== -1 ? index : 0;
+        };
+
+        const currentMessa = computed(() => messeRaggruppate.value[currentIndex.value]);
+
+        const nextMessa = () => { if (currentIndex.value < messeRaggruppate.value.length - 1) currentIndex.value++; };
+        const prevMessa = () => {
+            const oggi = new Date().toISOString().split('T')[0];
+            // Impedisce di andare a date precedenti a oggi
+            if (currentIndex.value > 0 && messeRaggruppate.value[currentIndex.value - 1].date >= oggi) {
+                currentIndex.value--;
+            }
+        };
+
+        const formatDate = (d) => {
+            return new Date(d).toLocaleDateString('it-IT', { weekday: 'long', day: 'numeric', month: 'long' });
+        };
+
+        const getIcon = (tipo) => {
+            const map = { 'Prima Lettura': 'fa-1', 'Salmo': 'fa-music', 'Seconda Lettura': 'fa-2', 'Preghiera dei Fedeli': 'fa-hands-praying' };
+            return map[tipo] || 'fa-book-open';
+        };
+
+        onMounted(() => {
+            fetchData();
+            // Aggiorna i dati ogni minuto per vedere cambi dell'ultimo secondo
+            setInterval(fetchData, 60000);
+        });
+
+        return { 
+            loading, currentMessa, currentIndex, messeRaggruppate, 
+            nextMessa, prevMessa, formatDate, getIcon, lastUpdate 
+        };
+    }
+}).mount('#app');
+</script>
+
+<style>
+    [v-cloak] { display: none; }
+</style>
+</body>
+</html>
