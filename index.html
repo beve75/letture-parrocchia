@@ -125,14 +125,19 @@
                             </div>
 
                             <div class="flex items-center">
-                                <button v-if="!slot.utente" @click="saveSlot(slot, currentUser)" 
-                                        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-all">
-                                    Eccomi
-                                </button>
-                                <button v-else-if="isAdmin || slot.utente === currentUser" @click="saveSlot(slot, '')" 
-                                        class="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-bold transition-all">
-                                    {{ isAdmin && slot.utente !== currentUser ? 'Rimuovi' : 'Annulla' }}
-                                </button>
+                                <template v-if="!isLocked(slot)">
+                                    <button v-if="!slot.utente" @click="saveSlot(slot, currentUser)" 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-all">
+                                        Eccomi
+                                    </button>
+                                    <button v-else-if="isAdmin || slot.utente === currentUser" @click="saveSlot(slot, '')" 
+                                            class="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-bold transition-all">
+                                        {{ isAdmin && slot.utente !== currentUser ? 'Rimuovi' : 'Annulla' }}
+                                    </button>
+                                </template>
+                                <div v-else class="text-slate-400 px-4 py-2 text-xs italic flex items-center gap-1">
+                                    <i class="fas fa-lock text-[10px]"></i> Chiuso
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -151,15 +156,13 @@ const { createApp, ref, computed, onMounted } = Vue;
 
 // --- CONFIGURAZIONE AMBIENTE ---
 const CONFIG = {
-    prod: 'https://script.google.com/macros/s/AKfycbyxKNEptMVjPs0dbJp_HZjzdgQXeZiQSehATkHDGwDKq8ip_kqE3FOMO2_Ew-2Oc0mUBA/exec',
-    test: 'https://script.google.com/macros/s/AKfycbyDarwZOqpizS0CO5aEMU-Gur6oj3BnD2X8L713TOxG-a9z1C8m1UgEY4YPcnSoPrVjXA/exec',
+    prod: 'https://script.google.com/macros/s/AKfycby4L9k7v7C13pS2O4H2P8fgRAZZtJtRnB4BKPMtTcN0MXl5tqPt1lMh4PnaDINLfaRwWw/exec',
+    test: 'https://script.google.com/macros/s/AKfycbxoPFCLS8kHCevYzPEkk5yTBE8C-r_2Vh1ul9morFLBkhoVEotILjVGxI6S0RP2NndVvQ/exec' 
 };
 
 const urlParams = new URLSearchParams(window.location.search);
 const isTestMode = urlParams.get('mode') === 'test';
 const SCRIPT_URL = isTestMode ? CONFIG.test : CONFIG.prod;
-
-console.log("🚀 Ambiente attivo:", isTestMode ? "TEST" : "PRODUZIONE");
 
 createApp({
     setup() {
@@ -173,6 +176,16 @@ createApp({
 
         const isAdmin = computed(() => currentUser.value === 'Amministratore-pb');
 
+        // Funzione per bloccare modifiche 15 min prima della messa
+        const isLocked = (slot) => {
+            if (!slot.data || !slot.orario) return false;
+            // Formato data e ora atteso: YYYY-MM-DD e HH:mm
+            const messaDate = new Date(`${slot.data}T${slot.orario.replace('.', ':')}:00`);
+            const oraAttuale = new Date();
+            const diff = messaDate - oraAttuale;
+            return diff < (15 * 60 * 1000); // 15 minuti in millisecondi
+        };
+
         const fetchData = async () => {
             if (db.value.length === 0) loading.value = true;
             try {
@@ -180,12 +193,16 @@ createApp({
                 const data = await res.json();
                 db.value = data;
                 localStorage.setItem('liturgia_cache_v3', JSON.stringify(data));
-                console.log("Dati aggiornati:", new Date().toLocaleTimeString());
             } catch (e) { console.error("Sync error"); }
             loading.value = false;
         };
 
         const saveSlot = async (slot, userName) => {
+            if (isLocked(slot)) {
+                alert("Questa messa è imminente o passata: non è più possibile effettuare modifiche.");
+                return;
+            }
+            
             isSaving.value = true;
             const oldUser = slot.utente;
             slot.utente = userName; 
@@ -199,7 +216,8 @@ createApp({
                         date: slot.data, 
                         time: slot.orario,
                         type: slot.tipo, 
-                        user: userName 
+                        user: userName,        // Il nuovo valore (Nome o "")
+                        requester: currentUser.value // chi sta facendo l'azione
                     })
                 });
                 
@@ -207,25 +225,21 @@ createApp({
                 
                 if (resultText.includes("SUCCESS")) {
                     localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
-                } else if (resultText.includes("ERRORE")) {
-                    alert(resultText); // Avviso se il posto è già stato occupato
-                    fetchData();
+                } else {
+                    // Se c'è un errore di concorrenza o altro
+                    alert("Sincronizzazione in corso: i dati erano cambiati nel frattempo. La pagina verrà aggiornata.");
+                    fetchData(); // Ricarichiamo subito i dati reali dal foglio
                 }
             } catch (e) {
                 slot.utente = oldUser;
-                console.error("❌ Errore di connessione:", e);
+                console.error("❌ Errore:", e);
             } finally {
                 isSaving.value = false;
             }
         };
 
         const getIcon = (tipo) => {
-            const map = { 
-                'Prima Lettura': 'fa-1', 
-                'Salmo': 'fa-music', 
-                'Seconda Lettura': 'fa-2', 
-                'Preghiera dei Fedeli': 'fa-hands-praying' 
-            };
+            const map = { 'Prima Lettura': 'fa-1', 'Salmo': 'fa-music', 'Seconda Lettura': 'fa-2', 'Preghiera dei Fedeli': 'fa-hands-praying' };
             return map[tipo] || 'fa-book-open';
         };
 
@@ -246,12 +260,7 @@ createApp({
             return Array.from({length: last}, (_, i) => {
                 const dStr = `${y}-${String(m+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`;
                 const isLiturgic = db.value.some(s => s.data === dStr);
-                return { 
-                    dayNum: i+1, 
-                    date: dStr, 
-                    isLiturgic, 
-                    isSunday: new Date(y, m, i + 1).getDay() === 0 
-                };
+                return { dayNum: i+1, date: dStr, isLiturgic, isSunday: new Date(y, m, i + 1).getDay() === 0 };
             });
         });
 
@@ -291,18 +300,14 @@ createApp({
 
         onMounted(() => { 
             if(currentUser.value) fetchData(); 
-            
-            // Polling automatico ogni 30 secondi
             setInterval(() => {
-                if (currentUser.value && !loading.value && !isSaving.value) {
-                    fetchData();
-                }
+                if (currentUser.value && !loading.value && !isSaving.value) fetchData();
             }, 30000);
         });
 
         return { 
             currentUser, tempName, loading, isSaving, db, viewDate, selectedDay, isAdmin, 
-            isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, isTestMode,
+            isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, isTestMode, isLocked,
             monthLabel: computed(() => viewDate.value.toLocaleString('it-IT', {month:'long', year:'numeric'})),
             login, logout, nextMonth, prevMonth, getSlots, selectDay, saveSlot, 
             formatDateLong, getIcon, getDistinctTimes, getSlotsByTime 
