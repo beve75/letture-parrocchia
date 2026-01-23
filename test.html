@@ -226,8 +226,9 @@ createApp({
                 if (resultText.includes("SUCCESS")) {
                     localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
                 } else {
-                    alert(resultText); 
-                    fetchData();
+                    // Se c'è un errore di concorrenza o altro
+                    alert("Sincronizzazione in corso: i dati erano cambiati nel frattempo. La pagina verrà aggiornata.");
+                    fetchData(); // Ricarichiamo subito i dati reali dal foglio
                 }
             } catch (e) {
                 slot.utente = oldUser;
