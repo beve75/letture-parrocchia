@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <link rel="icon" type="image/png" href="icona.png">
+    <link rel="apple-touch-icon" href="icona.png">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gestione Letture Parrocchiali</title>
+    <script src="https://unpkg.com/vue@3/dist/vue.global.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        [v-cloak] { display: none; }
+        .calendar-grid { display: grid; grid-template-columns: repeat(7, 1fr); }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+        .animate-detail { animation: fadeIn 0.3s ease-out; }
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-900 font-sans">
+
+<div id="app" v-cloak class="min-h-screen flex flex-col">
+    
+    <div v-if="isTestMode" class="bg-orange-500 text-white text-[10px] py-1.5 text-center font-bold uppercase tracking-widest sticky top-0 z-[60] shadow-md">
+        <i class="fas fa-flask mr-2"></i> Ambiente di Test - I dati non sono reali
+    </div>
+
+    <div v-if="loading && db.length === 0" class="fixed inset-0 bg-white z-50 flex flex-col items-center justify-center">
+        <div class="animate-spin text-blue-600 text-5xl mb-4"><i class="fas fa-circle-notch"></i></div>
+        <p class="text-slate-500 font-bold">Caricamento calendario...</p>
+    </div>
+
+    <div v-if="!currentUser" class="flex-grow flex items-center justify-center p-4 bg-blue-600">
+        <div class="bg-white p-8 rounded-3xl shadow-2xl w-full max-w-md">
+            <div class="text-center mb-8">
+                <i class="fas fa-bible text-5xl text-blue-600 mb-4"></i>
+                <h1 class="text-2xl font-bold text-slate-800">Servizio Letture</h1>
+                <p class="text-slate-500">Accedi per prenotare il tuo turno</p>
+            </div>
+            <input v-model="tempName" @keyup.enter="login" type="text" placeholder="Nome e Cognome" 
+                   class="w-full p-4 border-2 border-slate-100 rounded-2xl mb-4 focus:border-blue-500 outline-none text-center text-lg">
+            <button @click="login" class="w-full bg-blue-600 text-white font-bold py-4 rounded-2xl shadow-lg hover:bg-blue-700 transition-all">
+                Entra
+            </button>
+        </div>
+    </div>
+
+    <template v-else>
+        <header class="bg-white border-b sticky top-0 z-30 shadow-sm px-4 py-3" :style="isTestMode ? 'top: 28px' : 'top: 0'">
+            <div class="max-w-4xl mx-auto flex justify-between items-center">
+                <div class="flex items-center gap-2">
+                    <button @click="prevMonth" :disabled="isAtMinLimit" class="p-2 disabled:opacity-10"><i class="fas fa-chevron-left"></i></button>
+                    <span class="font-bold uppercase text-sm w-36 text-center text-blue-800 tracking-tighter">{{ monthLabel }}</span>
+                    <button @click="nextMonth" :disabled="isAtMaxLimit" class="p-2 disabled:opacity-10"><i class="fas fa-chevron-right"></i></button>
+                </div>
+                <div class="flex items-center gap-3">
+                    <div class="text-right hidden sm:block">
+                        <p class="text-[10px] font-bold text-slate-400 uppercase leading-none">Utente</p>
+                        <p class="text-sm font-bold text-blue-600">{{ isAdmin ? '🛡️ Amministratore' : currentUser }}</p>
+                    </div>
+                    <button @click="logout" class="w-10 h-10 rounded-full bg-slate-100 text-slate-400 hover:text-red-500 transition-colors">
+                        <i class="fas fa-power-off"></i>
+                    </button>
+                </div>
+            </div>
+        </header>
+
+        <main class="p-4 max-w-4xl mx-auto w-full flex-grow">
+            <div class="bg-white rounded-3xl shadow-sm border border-slate-200 overflow-hidden mb-8">
+                <div class="calendar-grid bg-slate-50 border-b">
+                    <div v-for="d in ['Lun','Mar','Mer','Gio','Ven','Sab','Dom']" class="py-3 text-[10px] font-black text-slate-400 text-center uppercase">{{d}}</div>
+                </div>
+                <div class="calendar-grid">
+                    <div v-for="empty in firstDayOffset" class="h-16 md:h-24 bg-slate-50/30 border-b border-r border-slate-50"></div>
+                    <div v-for="day in daysInMonth" :key="day.date" 
+                         @click="day.isLiturgic ? selectDay(day) : null"
+                         class="h-16 md:h-24 border-b border-r border-slate-100 p-2 relative transition-all"
+                         :class="[day.isLiturgic ? 'cursor-pointer hover:bg-blue-50' : 'opacity-20', selectedDay?.date === day.date ? 'bg-blue-50 ring-2 ring-inset ring-blue-500 z-10' : '']">
+                        
+                        <span class="text-sm font-bold" :class="day.isSunday ? 'text-red-500' : 'text-slate-600'">{{ day.dayNum }}</span>
+                        
+                        <div v-if="day.isLiturgic" class="absolute bottom-2 left-0 right-0 flex justify-center gap-1 px-1 flex-wrap">
+                            <div v-for="slot in getSlots(day.date)" 
+                                 class="w-1.5 h-1.5 rounded-full shadow-sm"
+                                 :class="slot.utente ? 'bg-green-500' : 'bg-amber-400'">
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="selectedDay" class="animate-detail pb-20">
+                <div class="flex items-center justify-between mb-4 px-2">
+                    <h2 class="text-xl font-bold capitalize text-slate-800">{{ formatDateLong(selectedDay.date) }}</h2>
+                    <button @click="selectedDay = null" class="text-slate-400 hover:text-slate-600"><i class="fas fa-times-circle text-2xl"></i></button>
+                </div>
+
+                <div v-for="time in getDistinctTimes(selectedDay.date)" :key="time" 
+                     class="bg-white rounded-3xl shadow-md border border-slate-200 overflow-hidden mb-6">
+                    
+                    <div class="bg-slate-50 px-6 py-3 border-b flex justify-between items-center">
+                        <div class="flex items-center gap-2">
+                            <i class="far fa-clock text-blue-600"></i>
+                            <span class="font-black text-slate-700 uppercase text-xs tracking-widest">Messa delle ore {{ time }}</span>
+                        </div>
+                        <span class="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                            {{ getSlotsByTime(selectedDay.date, time).filter(s => !s.utente).length }} posti liberi
+                        </span>
+                    </div>
+
+                    <div class="divide-y divide-slate-100">
+                        <div v-for="slot in getSlotsByTime(selectedDay.date, time)" :key="slot.id" 
+                             class="flex items-center justify-between p-5 hover:bg-slate-50/50 transition">
+                            
+                            <div class="flex items-center gap-4">
+                                <div class="w-10 h-10 rounded-2xl bg-blue-50 flex items-center justify-center text-blue-600">
+                                    <i class="fas" :class="getIcon(slot.tipo)"></i>
+                                </div>
+                                <div>
+                                    <p class="text-[10px] font-black text-slate-400 uppercase leading-none mb-1">{{ slot.tipo }}</p>
+                                    <p class="font-bold text-slate-700">
+                                        {{ slot.utente ? (isAdmin || slot.utente === currentUser ? slot.utente : 'Occupato') : 'Cercasi lettore' }}
+                                    </p>
+                                </div>
+                            </div>
+
+                            <div class="flex items-center">
+                                <template v-if="!isLocked(slot)">
+                                    <button v-if="!slot.utente" @click="saveSlot(slot, currentUser)" 
+                                            class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2 rounded-xl text-sm font-bold shadow-md active:scale-95 transition-all">
+                                        Eccomi
+                                    </button>
+                                    <button v-else-if="isAdmin || slot.utente === currentUser" @click="saveSlot(slot, '')" 
+                                            class="text-red-500 hover:bg-red-50 px-4 py-2 rounded-xl text-sm font-bold transition-all">
+                                        {{ isAdmin && slot.utente !== currentUser ? 'Rimuovi' : 'Annulla' }}
+                                    </button>
+                                </template>
+                                <div v-else class="text-slate-400 px-4 py-2 text-xs italic flex items-center gap-1">
+                                    <i class="fas fa-lock text-[10px]"></i> Chiuso
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </template>
+
+    <footer class="p-6 text-center text-slate-400 text-[10px] uppercase tracking-[0.2em]">
+        Comunità Liturgica &bull; 2026
+    </footer>
+</div>
+
+<script>
+const { createApp, ref, computed, onMounted } = Vue;
+
+// --- CONFIGURAZIONE AMBIENTE ---
+const CONFIG = {
+    prod: 'https://script.google.com/macros/s/AKfycbyxKNEptMVjPs0dbJp_HZjzdgQXeZiQSehATkHDGwDKq8ip_kqE3FOMO2_Ew-2Oc0mUBA/exec',
+    test: 'INSERISCI_QUI_URL_FOGLIO_DI_TEST' 
+};
+
+const urlParams = new URLSearchParams(window.location.search);
+const isTestMode = urlParams.get('mode') === 'test';
+const SCRIPT_URL = isTestMode ? CONFIG.test : CONFIG.prod;
+
+createApp({
+    setup() {
+        const currentUser = ref(localStorage.getItem('reader_name_v3') || null);
+        const tempName = ref('');
+        const loading = ref(false);
+        const isSaving = ref(false);
+        const db = ref(JSON.parse(localStorage.getItem('liturgia_cache_v3') || '[]'));
+        const viewDate = ref(new Date(2026, 0, 1)); 
+        const selectedDay = ref(null);
+
+        const isAdmin = computed(() => currentUser.value === 'Amministratore-pb');
+
+        // Funzione per bloccare modifiche 15 min prima della messa
+        const isLocked = (slot) => {
+            if (!slot.data || !slot.orario) return false;
+            // Formato data e ora atteso: YYYY-MM-DD e HH:mm
+            const messaDate = new Date(`${slot.data}T${slot.orario.replace('.', ':')}:00`);
+            const oraAttuale = new Date();
+            const diff = messaDate - oraAttuale;
+            return diff < (15 * 60 * 1000); // 15 minuti in millisecondi
+        };
+
+        const fetchData = async () => {
+            if (db.value.length === 0) loading.value = true;
+            try {
+                const res = await fetch(SCRIPT_URL);
+                const data = await res.json();
+                db.value = data;
+                localStorage.setItem('liturgia_cache_v3', JSON.stringify(data));
+            } catch (e) { console.error("Sync error"); }
+            loading.value = false;
+        };
+
+        const saveSlot = async (slot, userName) => {
+            if (isLocked(slot)) {
+                alert("Questa messa è imminente o passata: non è più possibile effettuare modifiche.");
+                return;
+            }
+            
+            isSaving.value = true;
+            const oldUser = slot.utente;
+            slot.utente = userName; 
+        
+            try {
+                const response = await fetch(SCRIPT_URL, {
+                    method: 'POST',
+                    mode: 'cors', 
+                    headers: { 'Content-Type': 'text/plain' },
+                    body: JSON.stringify({ 
+                        date: slot.data, 
+                        time: slot.orario,
+                        type: slot.tipo, 
+                        user: userName 
+                    })
+                });
+                
+                const resultText = await response.text();
+                
+                if (resultText.includes("SUCCESS")) {
+                    localStorage.setItem('liturgia_cache_v3', JSON.stringify(db.value));
+                } else {
+                    alert(resultText); 
+                    fetchData();
+                }
+            } catch (e) {
+                slot.utente = oldUser;
+                console.error("❌ Errore:", e);
+            } finally {
+                isSaving.value = false;
+            }
+        };
+
+        const getIcon = (tipo) => {
+            const map = { 'Prima Lettura': 'fa-1', 'Salmo': 'fa-music', 'Seconda Lettura': 'fa-2', 'Preghiera dei Fedeli': 'fa-hands-praying' };
+            return map[tipo] || 'fa-book-open';
+        };
+
+        const getSlots = (date) => db.value.filter(s => s.data === date);
+
+        const getDistinctTimes = (date) => {
+            const times = db.value.filter(s => s.data === date).map(s => s.orario);
+            return [...new Set(times)].sort();
+        };
+
+        const getSlotsByTime = (date, time) => {
+            return db.value.filter(s => s.data === date && s.orario === time);
+        };
+
+        const daysInMonth = computed(() => {
+            const y = viewDate.value.getFullYear(), m = viewDate.value.getMonth();
+            const last = new Date(y, m + 1, 0).getDate();
+            return Array.from({length: last}, (_, i) => {
+                const dStr = `${y}-${String(m+1).padStart(2,'0')}-${String(i+1).padStart(2,'0')}`;
+                const isLiturgic = db.value.some(s => s.data === dStr);
+                return { dayNum: i+1, date: dStr, isLiturgic, isSunday: new Date(y, m, i + 1).getDay() === 0 };
+            });
+        });
+
+        const isAtMinLimit = computed(() => {
+            if (!db.value.length) return true;
+            const minDate = db.value.map(s => s.data).sort()[0];
+            return `${viewDate.value.getFullYear()}-${String(viewDate.value.getMonth()+1).padStart(2,'0')}` <= minDate.substring(0,7);
+        });
+
+        const isAtMaxLimit = computed(() => {
+            if (!db.value.length) return true;
+            const maxDate = db.value.map(s => s.data).sort().reverse()[0];
+            return `${viewDate.value.getFullYear()}-${String(viewDate.value.getMonth()+1).padStart(2,'0')}` >= maxDate.substring(0,7);
+        });
+
+        const firstDayOffset = computed(() => {
+            let f = new Date(viewDate.value.getFullYear(), viewDate.value.getMonth(), 1).getDay();
+            return f === 0 ? 6 : f - 1;
+        });
+
+        const login = () => { 
+            if(tempName.value.trim().length > 2) { 
+                currentUser.value = tempName.value.trim(); 
+                localStorage.setItem('reader_name_v3', currentUser.value); 
+                fetchData(); 
+            }
+        };
+
+        const logout = () => { currentUser.value = null; localStorage.removeItem('reader_name_v3'); };
+        const nextMonth = () => viewDate.value = new Date(viewDate.value.setMonth(viewDate.value.getMonth()+1));
+        const prevMonth = () => viewDate.value = new Date(viewDate.value.setMonth(viewDate.value.getMonth()-1));
+        const selectDay = (day) => selectedDay.value = day;
+        const formatDateLong = (d) => {
+            const [y, m, day] = d.split('-');
+            return new Date(y, m-1, day).toLocaleDateString('it-IT', {weekday:'long', day:'numeric', month:'long'});
+        };
+
+        onMounted(() => { 
+            if(currentUser.value) fetchData(); 
+            setInterval(() => {
+                if (currentUser.value && !loading.value && !isSaving.value) fetchData();
+            }, 30000);
+        });
+
+        return { 
+            currentUser, tempName, loading, isSaving, db, viewDate, selectedDay, isAdmin, 
+            isAtMinLimit, isAtMaxLimit, daysInMonth, firstDayOffset, isTestMode, isLocked,
+            monthLabel: computed(() => viewDate.value.toLocaleString('it-IT', {month:'long', year:'numeric'})),
+            login, logout, nextMonth, prevMonth, getSlots, selectDay, saveSlot, 
+            formatDateLong, getIcon, getDistinctTimes, getSlotsByTime 
+        }
+    }
+}).mount('#app')
+</script>
+</body>
+</html>
