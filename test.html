@@ -216,7 +216,8 @@ createApp({
                         date: slot.data, 
                         time: slot.orario,
                         type: slot.tipo, 
-                        user: userName 
+                        user: userName,        // Il nuovo valore (Nome o "")
+                        requester: currentUser.value // chi sta facendo l'azione
                     })
                 });
                 
