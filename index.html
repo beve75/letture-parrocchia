@@ -171,7 +171,7 @@ createApp({
         const loading = ref(false);
         const isSaving = ref(false);
         const db = ref(JSON.parse(localStorage.getItem('liturgia_cache_v3') || '[]'));
-        const viewDate = ref(new Date(2026, 0, 1)); 
+        const viewDate = ref(new Date());
         const selectedDay = ref(null);
 
         const isAdmin = computed(() => currentUser.value === 'Amministratore-pb');
